@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Swaply Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="sidebar">
+    <h2 class="logo">Swaply</h2>
+    <ul class="menu">
+      <li><a href="#dashboard">Обзор</a></li>
+      <li><a href="#listings">Объявления</a></li>
+      <li><a href="#users">Пользователи</a></li>
+      <li><a href="#categories">Категории</a></li>
+    </ul>
+  </div>
+
+  <div class="main">
+
+    <div class="header">
+      <span>Панель администратора</span>
+      <span>Поп Я.В.</span>
+    </div>
+
+    <!-- Обзор -->
+    <div class="page" id="dashboard">
+      <h1>Обзор</h1>
+
+      <div class="stats">
+        <div class="box">
+          <p>Пользователи</p>
+          <b>1 284</b>
+        </div>
+        <div class="box">
+          <p>Активные объявления</p>
+          <b>1 501</b>
+        </div>
+        <div class="box">
+          <p>Успешные обмены</p>
+          <b>742</b>
+        </div>
+        <div class="box">
+          <p>На модерации</p>
+          <b>17</b>
+        </div>
+      </div>
+
+      <h2>Последние объявления</h2>
+      <table>
+        <tr>
+          <th>Название</th>
+          <th>Автор</th>
+          <th>Статус</th>
+        </tr>
+        <tr>
+          <td>Худи Nike, размер M</td>
+          <td>Анна К.</td>
+          <td class="active">Активно</td>
+        </tr>
+        <tr>
+          <td>Игровая приставка PS4</td>
+          <td>Дмитрий П.</td>
+          <td class="review">На проверке</td>
+        </tr>
+        <tr>
+          <td>Книги: «Мастер и Маргарита» + 3 романа</td>
+          <td>Мария С.</td>
+          <td class="active">Активно</td>
+        </tr>
+        <tr>
+          <td>Беспроводные наушники JBL</td>
+          <td>Илья В.</td>
+          <td class="active">Активно</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Объявления -->
+    <div class="page" id="listings">
+      <h1>Объявления</h1>
+
+      <table>
+        <tr>
+          <th>Название</th>
+          <th>Категория</th>
+          <th>Хочет взамен</th>
+          <th>Автор</th>
+          <th>Дата</th>
+          <th>Статус</th>
+        </tr>
+        <tr>
+          <td>Кофта Nike, M, белая</td>
+          <td>Одежда</td>
+          <td>Джинсы или кроссовки</td>
+          <td>Анна Потапова</td>
+          <td>09.10.2026</td>
+          <td class="active">Активно</td>
+        </tr>
+        <tr>
+          <td>Игровая приставка PS4</td>
+          <td>Игры</td>
+          <td>Nintendo Switch</td>
+          <td>Дмитрий П.</td>
+          <td>09.10.2026</td>
+          <td class="review">На проверке</td>
+        </tr>
+        <tr>
+          <td>Книги: «Мастер и Маргарита» + 3 романа</td>
+          <td>Книги</td>
+          <td>Любая фантастика</td>
+          <td>Мария С.</td>
+          <td>08.10.2026</td>
+          <td class="active">Активно</td>
+        </tr>
+        <tr>
+          <td>Беспроводные наушники JBL</td>
+          <td>Техника</td>
+          <td>Powerbank</td>
+          <td>Илья В.</td>
+          <td>08.10.2026</td>
+          <td class="active">Активно</td>
+        </tr>
+        <tr>
+          <td>Горный велосипед 26"</td>
+          <td>Хобби</td>
+          <td>Самокат или ролики</td>
+          <td>Олег Н.</td>
+          <td>07.10.2026</td>
+          <td class="review">На проверке</td>
+        </tr>
+        <tr>
+          <td>Набор LEGO Technic</td>
+          <td>Хобби</td>
+          <td>Настольные игры</td>
+          <td>Екатерина Л.</td>
+          <td>06.10.2026</td>
+          <td class="blocked">Заблокировано</td>
+        </tr>
+        <tr>
+          <td>Гитара акустическая</td>
+          <td>Хобби</td>
+          <td>Укулеле</td>
+          <td>Павел Р.</td>
+          <td>05.10.2026</td>
+          <td class="active">Активно</td>
+        </tr>
+        <tr>
+          <td>Куртка зимняя, размер L</td>
+          <td>Одежда</td>
+          <td>Пуховик M</td>
+          <td>Софья Т.</td>
+          <td>05.10.2026</td>
+          <td class="active">Активно</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Пользователи -->
+    <div class="page" id="users">
+      <h1>Пользователи</h1>
+
+      <table>
+        <tr>
+          <th>Имя</th>
+          <th>Email</th>
+          <th>Город</th>
+          <th>Объявлений</th>
+          <th>Обменов</th>
+          <th>Регистрация</th>
+          <th>Статус</th>
+          <th>Действия</th>
+        </tr>
+        <tr>
+          <td>Анна Ковалёва</td>
+          <td>anna.k@mail.ru</td>
+          <td>Киров</td>
+          <td>5</td>
+          <td>3</td>
+          <td>12.09.2026</td>
+          <td class="active">Активен</td>
+          <td>
+            <button>Просмотр</button>
+            <button>Изменить</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Дмитрий Попов</td>
+          <td>dmitry.p@gmail.com</td>
+          <td>Киров</td>
+          <td>2</td>
+          <td>1</td>
+          <td>14.09.2026</td>
+          <td class="active">Активен</td>
+          <td>
+            <button>Просмотр</button>
+            <button>Изменить</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Мария Седова</td>
+          <td>maria.s@yandex.ru</td>
+          <td>Слободской</td>
+          <td>8</td>
+          <td>6</td>
+          <td>20.09.2026</td>
+          <td class="active">Активен</td>
+          <td>
+            <button>Просмотр</button>
+            <button>Изменить</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Илья Волков</td>
+          <td>ilya.v@gmail.com</td>
+          <td>Киров</td>
+          <td>1</td>
+          <td>0</td>
+          <td>28.09.2026</td>
+          <td class="active">Активен</td>
+          <td>
+            <button>Просмотр</button>
+            <button>Изменить</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Екатерина Лебедева</td>
+          <td>kate.l@mail.ru</td>
+          <td>Киров</td>
+          <td>4</td>
+          <td>2</td>
+          <td>30.09.2026</td>
+          <td class="blocked">Заблокирован</td>
+          <td>
+            <button>Просмотр</button>
+            <button>Изменить</button>
+          </td>
+        </tr>
+        <tr>
+          <td>Олег Назаров</td>
+          <td>oleg.n@yandex.ru</td>
+          <td>Котельнич</td>
+          <td>3</td>
+          <td>1</td>
+          <td>02.10.2026</td>
+          <td class="active">Активен</td>
+          <td>
+            <button>Просмотр</button>
+            <button>Изменить</button>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Категории -->
+    <div class="page" id="categories">
+      <h1>Категории</h1>
+
+      <table>
+        <tr>
+          <th>Название</th>
+          <th>Объявлений</th>
+        </tr>
+        <tr>
+          <td>Одежда</td>
+          <td>412</td>
+        </tr>
+        <tr>
+          <td>Техника</td>
+          <td>268</td>
+        </tr>
+        <tr>
+          <td>Книги</td>
+          <td>305</td>
+        </tr>
+        <tr>
+          <td>Игры</td>
+          <td>187</td>
+        </tr>
+        <tr>
+          <td>Хобби</td>
+          <td>233</td>
+        </tr>
+        <tr>
+          <td>Для дома</td>
+          <td>96</td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+
+</body>
+</html>

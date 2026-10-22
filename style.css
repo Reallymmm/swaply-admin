@@ -1,0 +1,162 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  color: #222;
+  background: #f3f4f6;
+}
+
+/* левое меню */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 200px;
+  height: 100%;
+  background: #2b3245;
+  padding: 20px;
+}
+
+.logo {
+  color: white;
+  margin-bottom: 30px;
+}
+
+.menu {
+  list-style: none;
+}
+
+.menu li {
+  margin-bottom: 5px;
+}
+
+.menu a {
+  display: block;
+  padding: 10px;
+  color: #c5cad6;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.menu a:hover {
+  background: #3a425a;
+}
+
+/* правая часть */
+.main {
+  margin-left: 200px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  background: white;
+  padding: 15px 30px;
+  border-bottom: 1px solid #ddd;
+}
+
+.page {
+  padding: 30px;
+}
+
+h1 {
+  margin-bottom: 20px;
+  font-size: 24px;
+}
+
+h2 {
+  margin: 30px 0 10px;
+  font-size: 18px;
+}
+
+/* карточки на обзоре */
+.stats {
+  display: flex;
+  gap: 15px;
+}
+
+.box {
+  flex: 1;
+  background: white;
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.box p {
+  color: #777;
+  margin-bottom: 8px;
+}
+
+.box b {
+  font-size: 26px;
+}
+
+table {
+  width: 100%;
+  background: white;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 10px 12px;
+  text-align: left;
+  border: 1px solid #ddd;
+}
+
+th {
+  background: #eceef2;
+}
+
+/* кнопки (заглушки) */
+button {
+  padding: 5px 10px;
+  margin-right: 4px;
+  border: 1px solid #aaa;
+  background: #f5f5f5;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #e2e4e8;
+}
+
+/* статусы */
+.active {
+  color: green;
+}
+
+.review {
+  color: darkorange;
+}
+
+.blocked {
+  color: red;
+}
+
+/* переключение страниц без js:
+   показываем только ту страницу, на которую нажали (:target) */
+.page {
+  display: none;
+}
+
+.page:target {
+  display: block;
+}
+
+/* если ничего не выбрано - показываем обзор */
+#dashboard {
+  display: block;
+}
+
+.main:has(#listings:target) #dashboard,
+.main:has(#users:target) #dashboard,
+.main:has(#categories:target) #dashboard {
+  display: none;
+}
