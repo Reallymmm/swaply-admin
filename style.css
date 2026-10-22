@@ -47,6 +47,12 @@ body {
   background: #3a425a;
 }
 
+/* текущая страница в меню */
+.menu a.current {
+  background: #3a425a;
+  color: white;
+}
+
 /* правая часть */
 .main {
   margin-left: 200px;
@@ -138,25 +144,4 @@ button:hover {
 
 .blocked {
   color: red;
-}
-
-/* переключение страниц без js:
-   показываем только ту страницу, на которую нажали (:target) */
-.page {
-  display: none;
-}
-
-.page:target {
-  display: block;
-}
-
-/* если ничего не выбрано - показываем обзор */
-#dashboard {
-  display: block;
-}
-
-.main:has(#listings:target) #dashboard,
-.main:has(#users:target) #dashboard,
-.main:has(#categories:target) #dashboard {
-  display: none;
 }
