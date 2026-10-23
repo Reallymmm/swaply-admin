@@ -1,14 +1,22 @@
-# Swaply Admin — визуальный прототип (HTML + CSS)
+# Swaply Web
 
-Запуск в WebStorm:
-    открыть папку проекта -> правый клик на index.html -> Open in -> Browser
+Структура проекта:
 
-Файлы (каждая страница — отдельный html):
-    index.html      — Обзор (главная)
-    listings.html   — Объявления
-    users.html      — Пользователи
-    categories.html — Категории
-    style.css       — общие стили
+    swaply-web/
+      backend/    - сервер (FastAPI + PostgreSQL), отдаёт данные по /api/...
+      frontend/   - админка (HTML + CSS + JS), берёт данные у бэкенда
 
-Переключение между страницами — обычные ссылки в боковом меню, JS не используется.
-Если появится JS, складывайте его в отдельную папку js/ и подключайте через <script src="js/...">.
+Запуск (Windows, PowerShell):
+
+    cd backend
+    python -m venv .venv
+    .venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+    copy .env.example .env        (открыть .env и вписать пароль от PostgreSQL)
+    uvicorn app.main:app --reload
+
+Открыть в браузере: http://127.0.0.1:8000
+Документация API:   http://127.0.0.1:8000/docs
+
+Перед первым запуском в PostgreSQL нужно создать пустую базу swaply.
+Бэкенд сам отдаёт и папку frontend, поэтому отдельно фронт запускать не нужно.

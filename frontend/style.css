@@ -145,3 +145,32 @@ button:hover {
 .blocked {
   color: red;
 }
+
+/* ---- добавлено для бэкенда ---- */
+.inline {
+  display: inline;
+}
+
+.form-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.form-row input {
+  padding: 8px 10px;
+  border: 1px solid #aaa;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.empty {
+  padding: 20px;
+  color: #777;
+  background: white;
+  border: 1px solid #ddd;
+}
+
+.hidden {
+  display: none;
+}

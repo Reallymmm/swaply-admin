@@ -5,7 +5,7 @@
   <title>Обзор — Swaply Admin</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-page="dashboard">
 
   <div class="sidebar">
     <h2 class="logo">Swaply</h2>
@@ -24,60 +24,44 @@
       <span>Поп Я.В.</span>
     </div>
 
-    <!-- Обзор -->
     <div class="page">
       <h1>Обзор</h1>
+
+      <p id="error" class="empty hidden">Не удалось связаться с сервером. Проверь, что бэкенд запущен.</p>
 
       <div class="stats">
         <div class="box">
           <p>Пользователи</p>
-          <b>1 284</b>
+          <b id="stat-users">…</b>
         </div>
         <div class="box">
           <p>Активные объявления</p>
-          <b>1 501</b>
-        </div>
-        <div class="box">
-          <p>Успешные обмены</p>
-          <b>742</b>
+          <b id="stat-active">…</b>
         </div>
         <div class="box">
           <p>На модерации</p>
-          <b>17</b>
+          <b id="stat-review">…</b>
+        </div>
+        <div class="box">
+          <p>Заблокированные</p>
+          <b id="stat-blocked">…</b>
         </div>
       </div>
 
       <h2>Последние объявления</h2>
       <table>
-        <tr>
-          <th>Название</th>
-          <th>Автор</th>
-          <th>Статус</th>
-        </tr>
-        <tr>
-          <td>Худи Nike, размер M</td>
-          <td>Анна К.</td>
-          <td class="active">Активно</td>
-        </tr>
-        <tr>
-          <td>Игровая приставка PS4</td>
-          <td>Дмитрий П.</td>
-          <td class="review">На проверке</td>
-        </tr>
-        <tr>
-          <td>Книги: «Мастер и Маргарита» + 3 романа</td>
-          <td>Мария С.</td>
-          <td class="active">Активно</td>
-        </tr>
-        <tr>
-          <td>Беспроводные наушники JBL</td>
-          <td>Илья В.</td>
-          <td class="active">Активно</td>
-        </tr>
+        <thead>
+          <tr>
+            <th>Название</th>
+            <th>Автор</th>
+            <th>Статус</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
       </table>
     </div>
-
   </div>
 
+  <script src="app.js"></script>
 </body>
 </html>
