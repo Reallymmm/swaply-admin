@@ -21,7 +21,6 @@ class Base(DeclarativeBase):
 
 
 def get_db():
-    """Выдаёт сессию базы для одного запроса и потом закрывает её."""
     db = SessionLocal()
     try:
         yield db

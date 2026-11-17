@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -15,6 +15,9 @@ class User(Base):
     city: Mapped[str] = mapped_column(String(100), default="")
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    password_hash: Mapped[str] = mapped_column(String(200), default="")
+    token: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    avatar: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     listings: Mapped[list["Listing"]] = relationship(back_populates="owner")
 
@@ -36,7 +39,7 @@ class Listing(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     want: Mapped[str] = mapped_column(String(200), default="")  # "Хочу взамен"
     city: Mapped[str] = mapped_column(String(100), default="")
-    # active - активно, review - на проверке, blocked - заблокировано
+    # active - активно, review - на проверке, blocked - заблокировано, hidden - скрыто автором
     status: Mapped[str] = mapped_column(String(20), default="review")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -45,3 +48,70 @@ class Listing(Base):
 
     owner: Mapped["User"] = relationship(back_populates="listings")
     category: Mapped["Category | None"] = relationship(back_populates="listings")
+    photos: Mapped[list["ListingPhoto"]] = relationship(
+        back_populates="listing", order_by="ListingPhoto.id", cascade="all, delete-orphan"
+    )
+
+
+class ListingPhoto(Base):
+    """Фотография объявления. Сам файл лежит в папке backend/uploads, тут только его имя."""
+    __tablename__ = "listing_photos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
+    filename: Mapped[str] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    listing: Mapped["Listing"] = relationship(back_populates="photos")
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+    __table_args__ = (UniqueConstraint("user_id", "listing_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
+
+
+class Chat(Base):
+    __tablename__ = "chats"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"))
+    buyer_id: Mapped[int] = mapped_column(ForeignKey("users.id"))   # кто написал
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"))  # владелец объявления
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    listing: Mapped["Listing"] = relationship()
+    buyer: Mapped["User"] = relationship(foreign_keys=[buyer_id])
+    seller: Mapped["User"] = relationship(foreign_keys=[seller_id])
+    messages: Mapped[list["Message"]] = relationship(back_populates="chat", order_by="Message.id")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(ForeignKey("chats.id"))
+    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    chat: Mapped["Chat"] = relationship(back_populates="messages")
+
+
+class Review(Base):
+    """Отзыв покупателя о продавце. Один пользователь - один отзыв на продавца (его можно изменить)."""
+    __tablename__ = "reviews"
+    __table_args__ = (UniqueConstraint("author_id", "seller_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seller_id: Mapped[int] = mapped_column(ForeignKey("users.id"))  # о ком отзыв
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))  # кто написал
+    rating: Mapped[int] = mapped_column()                           # от 1 до 5
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+    seller: Mapped["User"] = relationship(foreign_keys=[seller_id])
+    author: Mapped["User"] = relationship(foreign_keys=[author_id])

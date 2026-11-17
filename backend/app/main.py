@@ -5,14 +5,13 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, SessionLocal, get_db
-from .models import User, Category, Listing
-from .seed import seed
+from .models import User, Category, Listing, Review
+from .mobile import router as mobile_router, UPLOADS_DIR, photo_out, avatar_url, rating_stats
 
-# папка frontend лежит рядом с папкой backend
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 
 STATUSES = ["active", "review", "blocked"]
@@ -20,16 +19,14 @@ STATUSES = ["active", "review", "blocked"]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # при старте: создаём таблицы и кладём тестовые данные, если база пустая
     Base.metadata.create_all(engine)
-    with SessionLocal() as db:
-        seed(db)
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar VARCHAR(100)"))
     yield
 
 
 app = FastAPI(title="Swaply", lifespan=lifespan)
 
-# CORS нужен, если фронт открыт с другого адреса (например, Live Server на :5500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,8 +34,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ручки для мобильного приложения
+app.include_router(mobile_router)
 
-# ---------- что приходит от фронта ----------
+# загруженные фотографии объявлений доступны по адресу /uploads/<имя файла>
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+
+
 
 class StatusIn(BaseModel):
     status: str
@@ -48,7 +50,9 @@ class CategoryIn(BaseModel):
     name: str
 
 
-# ---------- превращаем объекты базы в обычные словари для JSON ----------
+class UserEditIn(BaseModel):
+    name: str
+
 
 def listing_dict(x: Listing):
     return {
@@ -60,6 +64,9 @@ def listing_dict(x: Listing):
         "status": x.status,
         "category": x.category.name if x.category else None,
         "author": x.owner.name,
+        "author_id": x.owner_id,
+        "photos": [photo_out(p) for p in x.photos],
+        "cover": f"/uploads/{x.photos[0].filename}" if x.photos else None,
         "created_at": x.created_at.isoformat(),
     }
 
@@ -71,12 +78,11 @@ def user_dict(u: User):
         "email": u.email,
         "city": u.city,
         "is_blocked": u.is_blocked,
+        "avatar": avatar_url(u),
         "listings_count": len(u.listings),
         "created_at": u.created_at.isoformat(),
     }
 
-
-# ---------- обзор ----------
 
 @app.get("/api/stats")
 def api_stats(db: Session = Depends(get_db)):
@@ -91,7 +97,6 @@ def api_stats(db: Session = Depends(get_db)):
     }
 
 
-# ---------- объявления ----------
 
 @app.get("/api/listings")
 def api_listings(status: str | None = None, limit: int | None = None, db: Session = Depends(get_db)):
@@ -101,6 +106,14 @@ def api_listings(status: str | None = None, limit: int | None = None, db: Sessio
     if limit:
         query = query.limit(limit)
     return [listing_dict(x) for x in db.scalars(query).all()]
+
+
+@app.get("/api/listings/{listing_id}")
+def api_listing(listing_id: int, db: Session = Depends(get_db)):
+    listing = db.get(Listing, listing_id)
+    if not listing:
+        raise HTTPException(404, "Объявление не найдено")
+    return listing_dict(listing)
 
 
 @app.post("/api/listings/{listing_id}/status")
@@ -122,6 +135,55 @@ def api_users(db: Session = Depends(get_db)):
     return [user_dict(u) for u in db.scalars(select(User).order_by(User.id)).all()]
 
 
+@app.get("/api/users/{user_id}")
+def api_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    out = user_dict(user)
+    out["listings"] = [
+        listing_dict(x) for x in sorted(user.listings, key=lambda l: (l.created_at, l.id), reverse=True)
+    ]
+    reviews = db.scalars(
+        select(Review).where(Review.seller_id == user.id).order_by(Review.created_at.desc(), Review.id.desc())
+    ).all()
+    out["rating"], out["reviews_count"] = rating_stats(db, user.id)
+    out["reviews"] = [
+        {"id": r.id, "author": r.author.name, "rating": r.rating, "text": r.text,
+         "created_at": r.created_at.isoformat()}
+        for r in reviews
+    ]
+    return out
+
+
+@app.put("/api/users/{user_id}")
+def api_edit_user(user_id: int, data: UserEditIn, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    name = " ".join(data.name.split())
+    if not name:
+        raise HTTPException(400, "Введите ФИО")
+    if len(name) > 100:
+        raise HTTPException(400, "ФИО слишком длинное (до 100 символов)")
+    user.name = name
+    db.commit()
+    return user_dict(user)
+
+
+@app.delete("/api/users/{user_id}/avatar")
+def api_delete_avatar(user_id: int, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    old = user.avatar
+    user.avatar = None
+    db.commit()
+    if old:
+        (UPLOADS_DIR / old).unlink(missing_ok=True)
+    return user_dict(user)
+
+
 @app.post("/api/users/{user_id}/toggle-block")
 def api_toggle_block(user_id: int, db: Session = Depends(get_db)):
     user = db.get(User, user_id)
@@ -132,7 +194,6 @@ def api_toggle_block(user_id: int, db: Session = Depends(get_db)):
     return user_dict(user)
 
 
-# ---------- категории ----------
 
 @app.get("/api/categories")
 def api_categories(db: Session = Depends(get_db)):
@@ -167,7 +228,4 @@ def api_delete_category(category_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"ok": True}
 
-
-# ---------- фронтенд ----------
-# Эту строку держим В САМОМ КОНЦЕ: сначала ищутся /api/..., потом файлы из frontend
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

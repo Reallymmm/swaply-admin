@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Пользователь — Swaply Admin</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="user">
+
+  <div class="sidebar">
+    <h2 class="logo">Swaply</h2>
+    <ul class="menu">
+      <li><a href="index.html">Обзор</a></li>
+      <li><a href="listings.html">Объявления</a></li>
+      <li><a href="users.html" class="current">Пользователи</a></li>
+      <li><a href="categories.html">Категории</a></li>
+    </ul>
+  </div>
+
+  <div class="main">
+
+    <div class="header">
+      <span>Панель администратора</span>
+      <span>Поп Я.В.</span>
+    </div>
+
+    <div class="page">
+      <p id="error" class="empty hidden">Не удалось связаться с сервером. Проверь, что бэкенд запущен.</p>
+      <p id="ok" class="ok hidden"></p>
+      <div id="content"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

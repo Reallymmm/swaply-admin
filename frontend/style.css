@@ -174,3 +174,92 @@ button:hover {
 .hidden {
   display: none;
 }
+
+/* ---- страницы объявления и пользователя ---- */
+a {
+  color: #2b5fd9;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.thumb {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.thumb-round {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.photo {
+  width: 240px;
+  height: 180px;
+  object-fit: cover;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  display: block;
+}
+
+.info {
+  width: auto;
+  min-width: 420px;
+  margin-bottom: 15px;
+}
+
+.info th {
+  width: 150px;
+}
+
+.actions {
+  margin: 15px 0 5px;
+}
+
+.profile {
+  display: flex;
+  gap: 25px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.avatar-big {
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+  flex-shrink: 0;
+}
+
+.avatar-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #2b3245;
+  color: white;
+  font-size: 56px;
+}
+
+.ok {
+  padding: 12px 20px;
+  margin-bottom: 15px;
+  color: #1b6b2f;
+  background: #e3f4e7;
+  border: 1px solid #b7dfc1;
+}
