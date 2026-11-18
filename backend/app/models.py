@@ -5,6 +5,16 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
 
+# Причины блокировки аккаунта (ключ хранится в БД, название показывается людям)
+BAN_REASONS = {
+    "spam": "Спам",
+    "fraud": "Мошенничество",
+    "abuse": "Оскорбления и неприемлемое поведение",
+    "prohibited": "Запрещённые товары",
+    "fake": "Фейковый аккаунт",
+    "other": "Другое",
+}
+
 
 class User(Base):
     __tablename__ = "users"
@@ -18,6 +28,9 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(200), default="")
     token: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     avatar: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ban_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)    # ключ из BAN_REASONS
+    ban_comment: Mapped[str] = mapped_column(String(300), default="")
+    banned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     listings: Mapped[list["Listing"]] = relationship(back_populates="owner")
 
@@ -111,7 +124,57 @@ class Review(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))  # кто написал
     rating: Mapped[int] = mapped_column()                           # от 1 до 5
     text: Mapped[str] = mapped_column(Text, default="")
+    # visible - виден всем, hidden - скрыт модератором (не виден и не влияет на рейтинг)
+    status: Mapped[str] = mapped_column(String(20), default="visible", server_default="visible")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     seller: Mapped["User"] = relationship(foreign_keys=[seller_id])
     author: Mapped["User"] = relationship(foreign_keys=[author_id])
+
+
+class Appeal(Base):
+    """Апелляция заблокированного пользователя."""
+    __tablename__ = "appeals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    text: Mapped[str] = mapped_column(Text)
+    ban_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)  # за что заблокировали на момент подачи
+    # pending - на рассмотрении, approved - одобрена, rejected - отклонена
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    admin_comment: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped["User"] = relationship()
+
+
+class EmailCode(Base):
+    """Код подтверждения почты при регистрации.
+    Аккаунт создаётся только после ввода кода, а пока данные ждут здесь (пароль уже в виде хэша)."""
+    __tablename__ = "email_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email: Mapped[str] = mapped_column(String(150), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    password_hash: Mapped[str] = mapped_column(String(200))
+    code_hash: Mapped[str] = mapped_column(String(64))   # сам код не храним
+    attempts: Mapped[int] = mapped_column(default=0)     # сколько раз ввели неверно
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
+class Notification(Base):
+    """Уведомление для пользователя мобильного приложения."""
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # message - новое сообщение в чате, listing_approved / listing_blocked - решение модерации
+    kind: Mapped[str] = mapped_column(String(30))
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(String(300), default="")
+    chat_id: Mapped[int | None] = mapped_column(nullable=True)
+    listing_id: Mapped[int | None] = mapped_column(nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)

@@ -1,15 +1,21 @@
 import base64
 import binascii
+import hashlib
+import hmac
+import logging
+import secrets
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, or_, func, update
 from sqlalchemy.orm import Session
 
 from .db import get_db
-from .models import User, Category, Listing, ListingPhoto, Review, Favorite, Chat, Message
+from .mailer import send_code
+from .models import User, Category, Listing, ListingPhoto, Review, Favorite, Chat, Message, Appeal, Notification, EmailCode, BAN_REASONS
 from .security import hash_password, verify_password, new_token
 
 router = APIRouter(prefix="/api/m")
@@ -26,6 +32,19 @@ class RegisterIn(BaseModel):
     name: str
     email: str
     password: str
+
+
+class ConfirmIn(BaseModel):
+    email: str
+    code: str
+
+
+class ResendIn(BaseModel):
+    email: str
+
+
+class CityIn(BaseModel):
+    city: str
 
 
 class LoginIn(BaseModel):
@@ -48,6 +67,17 @@ class ReviewIn(BaseModel):
     text: str = ""
 
 
+class AppealIn(BaseModel):
+    email: str
+    password: str
+    text: str
+
+
+class CredentialsIn(BaseModel):
+    email: str
+    password: str
+
+
 class ChatIn(BaseModel):
     listing_id: int
 
@@ -55,6 +85,25 @@ class ChatIn(BaseModel):
 class MessageIn(BaseModel):
     text: str
 
+
+
+def notify(db: Session, user_id: int, kind: str, title: str, body: str = "",
+           chat_id: int | None = None, listing_id: int | None = None):
+    """Добавляет уведомление в сессию (commit делает вызывающий код)."""
+    db.add(Notification(user_id=user_id, kind=kind, title=title[:200], body=body[:300],
+                        chat_id=chat_id, listing_id=listing_id))
+
+
+class ReadIn(BaseModel):
+    kinds: list[str] | None = None  # None - все
+
+
+def ban_message(u: User) -> str:
+    """Текст для заблокированного: причина берётся из списка причин."""
+    text = "Аккаунт заблокирован администратором"
+    if u.ban_reason:
+        text += ". Причина: " + BAN_REASONS.get(u.ban_reason, u.ban_reason)
+    return text
 
 
 def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
@@ -65,7 +114,7 @@ def current_user(authorization: str | None = Header(default=None), db: Session =
     if not user:
         raise HTTPException(401, "Нужно войти в аккаунт")
     if user.is_blocked:
-        raise HTTPException(403, "Аккаунт заблокирован администратором")
+        raise HTTPException(403, ban_message(user))
     return user
 
 
@@ -76,7 +125,9 @@ def avatar_url(u: User) -> str | None:
 
 def rating_stats(db: Session, user_id: int):
     avg, count = db.execute(
-        select(func.avg(Review.rating), func.count(Review.id)).where(Review.seller_id == user_id)
+        select(func.avg(Review.rating), func.count(Review.id)).where(
+            Review.seller_id == user_id, Review.status == "visible"
+        )
     ).one()
     return (round(float(avg), 1) if avg is not None else None), count
 
@@ -143,21 +194,122 @@ def listing_out(x: Listing, favs: set[int], user: User):
     }
 
 
+# ---------- регистрация с подтверждением почты ----------
+# 1) /register - проверяет данные и шлёт на почту 6-значный код (аккаунт ещё не создан)
+# 2) /register/confirm - принимает код, создаёт аккаунт и сразу входит
+# 3) /register/resend - отправляет новый код
+
+CODE_TTL = timedelta(minutes=10)      # сколько живёт код
+RESEND_AFTER = timedelta(seconds=60)  # как часто можно просить новый код
+MAX_ATTEMPTS = 5                      # сколько раз можно ошибиться в коде
+
+
+def make_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def code_digest(email: str, code: str) -> str:
+    return hashlib.sha256(f"{email}:{code}".encode()).hexdigest()
+
+
+def deliver_code(email: str, code: str):
+    """Шлёт письмо; если почта не работает - понятная ошибка вместо падения сервера."""
+    try:
+        send_code(email, code)
+    except Exception:
+        logging.exception("Не удалось отправить письмо на %s", email)
+        raise HTTPException(503, "Не удалось отправить письмо. Проверьте адрес почты или попробуйте позже")
+
+
+def wait_seconds(pending: EmailCode) -> int:
+    """Сколько секунд ещё нельзя запрашивать новый код (0 - уже можно)."""
+    left = (RESEND_AFTER - (datetime.now() - pending.created_at)).total_seconds()
+    return int(left) + 1 if left > 0 else 0
+
+
 @router.post("/register")
 def register(data: RegisterIn, db: Session = Depends(get_db)):
     name = data.name.strip()
     email = data.email.strip().lower()
     if not name:
         raise HTTPException(400, "Введите имя")
-    if "@" not in email:
+    if "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(400, "Введите корректный email")
     if len(data.password) < 6:
         raise HTTPException(400, "Пароль должен быть не короче 6 символов")
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(409, "Пользователь с таким email уже есть")
 
-    user = User(name=name, email=email, city="", password_hash=hash_password(data.password), token=new_token())
+    pending = db.scalar(select(EmailCode).where(EmailCode.email == email))
+    if pending and wait_seconds(pending):
+        raise HTTPException(429, f"Код уже отправлен. Повторить можно через {wait_seconds(pending)} с")
+
+    code = make_code()
+    deliver_code(email, code)  # сначала письмо: если оно не ушло, в базе ничего не остаётся
+
+    now = datetime.now()
+    if not pending:
+        pending = EmailCode(email=email)
+        db.add(pending)
+    pending.name = name
+    pending.password_hash = hash_password(data.password)
+    pending.code_hash = code_digest(email, code)
+    pending.attempts = 0
+    pending.created_at = now
+    pending.expires_at = now + CODE_TTL
+    db.commit()
+    return {"ok": True, "email": email, "expires_in": int(CODE_TTL.total_seconds()), "resend_in": int(RESEND_AFTER.total_seconds())}
+
+
+@router.post("/register/resend")
+def register_resend(data: ResendIn, db: Session = Depends(get_db)):
+    email = data.email.strip().lower()
+    pending = db.scalar(select(EmailCode).where(EmailCode.email == email))
+    if not pending:
+        raise HTTPException(400, "Сначала заполните форму регистрации")
+    if wait_seconds(pending):
+        raise HTTPException(429, f"Повторить можно через {wait_seconds(pending)} с")
+
+    code = make_code()
+    deliver_code(email, code)
+    now = datetime.now()
+    pending.code_hash = code_digest(email, code)
+    pending.attempts = 0
+    pending.created_at = now
+    pending.expires_at = now + CODE_TTL
+    db.commit()
+    return {"ok": True, "expires_in": int(CODE_TTL.total_seconds()), "resend_in": int(RESEND_AFTER.total_seconds())}
+
+
+@router.post("/register/confirm")
+def register_confirm(data: ConfirmIn, db: Session = Depends(get_db)):
+    email = data.email.strip().lower()
+    code = data.code.strip()
+    pending = db.scalar(select(EmailCode).where(EmailCode.email == email))
+    if not pending:
+        raise HTTPException(400, "Код не найден. Запросите новый")
+    if datetime.now() > pending.expires_at:
+        db.delete(pending)
+        db.commit()
+        raise HTTPException(400, "Код устарел. Зарегистрируйтесь заново, чтобы получить новый")
+
+    if not hmac.compare_digest(code_digest(email, code), pending.code_hash):
+        pending.attempts += 1
+        if pending.attempts >= MAX_ATTEMPTS:
+            db.delete(pending)
+            db.commit()
+            raise HTTPException(429, "Слишком много неверных попыток. Зарегистрируйтесь заново, чтобы получить новый код")
+        db.commit()
+        raise HTTPException(400, f"Неверный код. Осталось попыток: {MAX_ATTEMPTS - pending.attempts}")
+
+    if db.scalar(select(User).where(User.email == email)):
+        db.delete(pending)
+        db.commit()
+        raise HTTPException(409, "Пользователь с таким email уже есть")
+
+    user = User(name=pending.name, email=email, city="", password_hash=pending.password_hash, token=new_token())
     db.add(user)
+    db.delete(pending)
     db.commit()
     return {"token": user.token, "user": user_out(user)}
 
@@ -168,15 +320,80 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(401, "Неверный email или пароль")
     if user.is_blocked:
-        raise HTTPException(403, "Аккаунт заблокирован администратором")
+        raise HTTPException(403, ban_message(user))
     if not user.token:
         user.token = new_token()
         db.commit()
     return {"token": user.token, "user": user_out(user)}
 
 
+# ---------- апелляции (работают без токена: заблокированного пользователя токен не пускает) ----------
+
+def blocked_user(db: Session, email: str, password: str) -> User:
+    user = db.scalar(select(User).where(User.email == email.strip().lower()))
+    if not user or not verify_password(password, user.password_hash):
+        raise HTTPException(401, "Неверный email или пароль")
+    if not user.is_blocked:
+        raise HTTPException(400, "Ваш аккаунт не заблокирован")
+    return user
+
+
+def appeal_out(a: Appeal):
+    return {
+        "id": a.id,
+        "text": a.text,
+        "status": a.status,
+        "admin_comment": a.admin_comment,
+        "created_at": a.created_at.isoformat(),
+        "resolved_at": a.resolved_at.isoformat() if a.resolved_at else None,
+    }
+
+
+@router.post("/appeals/status")
+def appeals_status(data: CredentialsIn, db: Session = Depends(get_db)):
+    """Причина блокировки и история апелляций - для экрана «Аккаунт заблокирован»."""
+    user = blocked_user(db, data.email, data.password)
+    appeals = db.scalars(select(Appeal).where(Appeal.user_id == user.id).order_by(Appeal.id.desc())).all()
+    return {
+        "reason": user.ban_reason,
+        "reason_name": BAN_REASONS.get(user.ban_reason) if user.ban_reason else None,
+        "comment": user.ban_comment,
+        "banned_at": user.banned_at.isoformat() if user.banned_at else None,
+        "can_appeal": not any(a.status == "pending" for a in appeals),
+        "appeals": [appeal_out(a) for a in appeals],
+    }
+
+
+@router.post("/appeals")
+def create_appeal(data: AppealIn, db: Session = Depends(get_db)):
+    user = blocked_user(db, data.email, data.password)
+    text = data.text.strip()
+    if len(text) < 10:
+        raise HTTPException(400, "Опишите ситуацию подробнее (не короче 10 символов)")
+    if len(text) > 1000:
+        raise HTTPException(400, "Слишком длинный текст (до 1000 символов)")
+    if db.scalar(select(Appeal).where(Appeal.user_id == user.id, Appeal.status == "pending")):
+        raise HTTPException(409, "Ваша апелляция уже на рассмотрении")
+    a = Appeal(user_id=user.id, text=text, ban_reason=user.ban_reason)
+    db.add(a)
+    db.commit()
+    return appeal_out(a)
+
+
 @router.get("/me")
 def me(user: User = Depends(current_user)):
+    return user_out(user)
+
+
+@router.put("/me/city")
+def set_city(data: CityIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Меняет местоположение пользователя. Город в его объявлениях обновляется вместе с ним."""
+    city = " ".join(data.city.split())  # убираем лишние пробелы
+    if len(city) > 100:
+        raise HTTPException(400, "Слишком длинное название (до 100 символов)")
+    user.city = city
+    db.execute(update(Listing).where(Listing.owner_id == user.id).values(city=city))
+    db.commit()
     return user_out(user)
 
 
@@ -219,7 +436,8 @@ def user_profile(user_id: int, db: Session = Depends(get_db), user: User = Depen
     out["listings"] = listings
 
     reviews = db.scalars(
-        select(Review).where(Review.seller_id == u.id).order_by(Review.created_at.desc(), Review.id.desc())
+        select(Review).where(Review.seller_id == u.id, Review.status == "visible")
+        .order_by(Review.created_at.desc(), Review.id.desc())
     ).all()
     out["rating"], out["reviews_count"] = rating_stats(db, u.id)
     out["reviews"] = [review_out(r, user) for r in reviews]
@@ -243,6 +461,8 @@ def add_review(user_id: int, data: ReviewIn, db: Session = Depends(get_db), user
 
     review = db.scalar(select(Review).where(Review.seller_id == seller.id, Review.author_id == user.id))
     if review:
+        if review.status != "visible":
+            raise HTTPException(400, "Ваш отзыв скрыт модератором, изменить его нельзя")
         review.rating = data.rating
         review.text = text
     else:
@@ -253,11 +473,14 @@ def add_review(user_id: int, data: ReviewIn, db: Session = Depends(get_db), user
 
 
 @router.get("/feed")
-def feed(q: str = "", db: Session = Depends(get_db), user: User = Depends(current_user)):
+def feed(q: str = "", category_id: int | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
     query = select(Listing).where(Listing.status == "active").order_by(Listing.created_at.desc(), Listing.id.desc())
     q = q.strip()
     if q:
         query = query.where(or_(Listing.title.ilike(f"%{q}%"), Listing.want.ilike(f"%{q}%")))
+    # фильтр по категории (если не передан - показываем всё)
+    if category_id is not None:
+        query = query.where(Listing.category_id == category_id)
     favs = favorite_ids(db, user)
     return [listing_out(x, favs, user) for x in db.scalars(query).all()]
 
@@ -472,8 +695,10 @@ def chat_detail(chat_id: int, db: Session = Depends(get_db), user: User = Depend
     return {
         "id": c.id,
         "other_name": other.name,
+        "listing_id": c.listing_id,
         "listing_title": c.listing.title,
         "listing_want": c.listing.want,
+        "listing_cover": f"/uploads/{c.listing.photos[0].filename}" if c.listing.photos else None,
         "messages": [message_out(m, user) for m in c.messages],
     }
 
@@ -486,5 +711,75 @@ def send_message(chat_id: int, data: MessageIn, db: Session = Depends(get_db), u
         raise HTTPException(400, "Пустое сообщение")
     m = Message(chat_id=c.id, sender_id=user.id, text=text)
     db.add(m)
+    recipient_id = c.seller_id if c.buyer_id == user.id else c.buyer_id
+    notify(db, recipient_id, "message", user.name, text, chat_id=c.id)
     db.commit()
     return message_out(m, user)
+
+
+# ---------- уведомления (приложение опрашивает сервер, пока открыто) ----------
+
+def notification_out(n: Notification):
+    return {
+        "id": n.id,
+        "kind": n.kind,
+        "title": n.title,
+        "body": n.body,
+        "chat_id": n.chat_id,
+        "listing_id": n.listing_id,
+        "is_read": n.is_read,
+        "created_at": n.created_at.isoformat(),
+    }
+
+
+@router.get("/notifications/history")
+def notifications_history(before: int | None = None, limit: int = 30, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """История уведомлений, новые сверху. Следующая страница: before = id последнего полученного."""
+    limit = max(1, min(limit, 100))
+    query = select(Notification).where(Notification.user_id == user.id).order_by(Notification.id.desc()).limit(limit + 1)
+    if before is not None:
+        query = query.where(Notification.id < before)
+    rows = db.scalars(query).all()
+    return {"items": [notification_out(n) for n in rows[:limit]], "has_more": len(rows) > limit}
+
+
+@router.get("/notifications")
+def poll_notifications(after: int | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    """Новые уведомления (id больше after) и счётчики непрочитанных.
+    Первый запрос (без after) ничего не возвращает, только last_id, чтобы старое не всплывало."""
+    last_id = db.scalar(select(func.max(Notification.id)).where(Notification.user_id == user.id)) or 0
+    items = []
+    if after is not None:
+        rows = db.scalars(
+            select(Notification)
+            .where(Notification.user_id == user.id, Notification.id > after)
+            .order_by(Notification.id)
+            .limit(20)
+        ).all()
+        items = [notification_out(n) for n in rows]
+
+    def unread(*where):
+        return db.scalar(
+            select(func.count()).select_from(Notification)
+            .where(Notification.user_id == user.id, Notification.is_read == False, *where)  # noqa: E712
+        )
+
+    return {
+        "items": items,
+        "last_id": last_id,
+        "unread_messages": unread(Notification.kind == "message"),
+        "unread_other": unread(Notification.kind != "message"),
+    }
+
+
+@router.post("/notifications/read")
+def read_notifications(data: ReadIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    query = select(Notification).where(Notification.user_id == user.id, Notification.is_read == False)  # noqa: E712
+    if data.kinds == ["message"]:
+        query = query.where(Notification.kind == "message")
+    elif data.kinds == ["other"]:
+        query = query.where(Notification.kind != "message")
+    for n in db.scalars(query).all():
+        n.is_read = True
+    db.commit()
+    return {"ok": True}

@@ -9,12 +9,16 @@ from sqlalchemy import select, func, text
 from sqlalchemy.orm import Session
 
 from .db import Base, engine, SessionLocal, get_db
-from .models import User, Category, Listing, Review
-from .mobile import router as mobile_router, UPLOADS_DIR, photo_out, avatar_url, rating_stats
+from datetime import datetime
+
+from .models import User, Category, Listing, Review, Appeal, BAN_REASONS
+from .mobile import router as mobile_router, UPLOADS_DIR, photo_out, avatar_url, rating_stats, notify
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 
 STATUSES = ["active", "review", "blocked"]
+REVIEW_STATUSES = ["visible", "hidden"]
+APPEAL_STATUSES = ["pending", "approved", "rejected"]
 
 
 @asynccontextmanager
@@ -22,6 +26,10 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_reason VARCHAR(30)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ban_comment VARCHAR(300) NOT NULL DEFAULT ''"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP"))
+        conn.execute(text("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'visible'"))
     yield
 
 
@@ -54,6 +62,16 @@ class UserEditIn(BaseModel):
     name: str
 
 
+class BlockIn(BaseModel):
+    reason: str
+    comment: str = ""
+
+
+class AppealResolveIn(BaseModel):
+    decision: str  # approve / reject
+    comment: str = ""
+
+
 def listing_dict(x: Listing):
     return {
         "id": x.id,
@@ -78,6 +96,10 @@ def user_dict(u: User):
         "email": u.email,
         "city": u.city,
         "is_blocked": u.is_blocked,
+        "ban_reason": u.ban_reason,
+        "ban_reason_name": BAN_REASONS.get(u.ban_reason) if u.ban_reason else None,
+        "ban_comment": u.ban_comment,
+        "banned_at": u.banned_at.isoformat() if u.banned_at else None,
         "avatar": avatar_url(u),
         "listings_count": len(u.listings),
         "created_at": u.created_at.isoformat(),
@@ -94,6 +116,8 @@ def api_stats(db: Session = Depends(get_db)):
         "active": count(Listing, Listing.status == "active"),
         "review": count(Listing, Listing.status == "review"),
         "blocked": count(Listing, Listing.status == "blocked"),
+        "appeals": count(Appeal, Appeal.status == "pending"),
+        "reviews": count(Review),
     }
 
 
@@ -123,7 +147,14 @@ def api_set_status(listing_id: int, data: StatusIn, db: Session = Depends(get_db
         raise HTTPException(404, "Объявление не найдено")
     if data.status not in STATUSES:
         raise HTTPException(400, "Неизвестный статус")
+    changed = listing.status != data.status
     listing.status = data.status
+    if changed and data.status == "active":
+        notify(db, listing.owner_id, "listing_approved", "Объявление одобрено",
+               f"«{listing.title}» прошло модерацию и опубликовано", listing_id=listing.id)
+    elif changed and data.status == "blocked":
+        notify(db, listing.owner_id, "listing_blocked", "Объявление заблокировано",
+               f"«{listing.title}» не прошло модерацию", listing_id=listing.id)
     db.commit()
     return listing_dict(listing)
 
@@ -149,10 +180,10 @@ def api_user(user_id: int, db: Session = Depends(get_db)):
     ).all()
     out["rating"], out["reviews_count"] = rating_stats(db, user.id)
     out["reviews"] = [
-        {"id": r.id, "author": r.author.name, "rating": r.rating, "text": r.text,
-         "created_at": r.created_at.isoformat()}
-        for r in reviews
+        review_dict(r) for r in reviews
     ]
+    appeals = db.scalars(select(Appeal).where(Appeal.user_id == user.id).order_by(Appeal.id.desc())).all()
+    out["appeals"] = [appeal_dict(a) for a in appeals]
     return out
 
 
@@ -184,15 +215,146 @@ def api_delete_avatar(user_id: int, db: Session = Depends(get_db)):
     return user_dict(user)
 
 
-@app.post("/api/users/{user_id}/toggle-block")
-def api_toggle_block(user_id: int, db: Session = Depends(get_db)):
+@app.get("/api/ban-reasons")
+def api_ban_reasons():
+    return [{"key": k, "name": v} for k, v in BAN_REASONS.items()]
+
+
+@app.post("/api/users/{user_id}/block")
+def api_block_user(user_id: int, data: BlockIn, db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(404, "Пользователь не найден")
-    user.is_blocked = not user.is_blocked
+    if data.reason not in BAN_REASONS:
+        raise HTTPException(400, "Выберите причину блокировки из списка")
+    comment = data.comment.strip()[:300]
+    if data.reason == "other" and not comment:
+        raise HTTPException(400, "Для причины «Другое» напишите комментарий")
+    user.is_blocked = True
+    user.ban_reason = data.reason
+    user.ban_comment = comment
+    user.banned_at = datetime.now()
     db.commit()
     return user_dict(user)
 
+
+def unblock(db: Session, user: User, comment: str):
+    """Снимает блокировку и закрывает висящие апелляции пользователя."""
+    user.is_blocked = False
+    user.ban_reason = None
+    user.ban_comment = ""
+    user.banned_at = None
+    for a in db.scalars(select(Appeal).where(Appeal.user_id == user.id, Appeal.status == "pending")).all():
+        a.status = "approved"
+        a.admin_comment = comment
+        a.resolved_at = datetime.now()
+
+
+@app.post("/api/users/{user_id}/unblock")
+def api_unblock_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "Пользователь не найден")
+    unblock(db, user, "Аккаунт разблокирован администратором")
+    db.commit()
+    return user_dict(user)
+
+
+# ---------- апелляции ----------
+
+def appeal_dict(a: Appeal):
+    return {
+        "id": a.id,
+        "user_id": a.user_id,
+        "user": a.user.name,
+        "email": a.user.email,
+        "is_blocked": a.user.is_blocked,
+        "ban_reason": a.ban_reason,
+        "ban_reason_name": BAN_REASONS.get(a.ban_reason) if a.ban_reason else None,
+        "ban_comment": a.user.ban_comment,
+        "text": a.text,
+        "status": a.status,
+        "admin_comment": a.admin_comment,
+        "created_at": a.created_at.isoformat(),
+        "resolved_at": a.resolved_at.isoformat() if a.resolved_at else None,
+    }
+
+
+@app.get("/api/appeals")
+def api_appeals(status: str | None = None, db: Session = Depends(get_db)):
+    query = select(Appeal).order_by(Appeal.created_at.desc(), Appeal.id.desc())
+    if status:
+        query = query.where(Appeal.status == status)
+    return [appeal_dict(a) for a in db.scalars(query).all()]
+
+
+@app.post("/api/appeals/{appeal_id}/resolve")
+def api_resolve_appeal(appeal_id: int, data: AppealResolveIn, db: Session = Depends(get_db)):
+    a = db.get(Appeal, appeal_id)
+    if not a:
+        raise HTTPException(404, "Апелляция не найдена")
+    if a.status != "pending":
+        raise HTTPException(400, "Эта апелляция уже рассмотрена")
+    if data.decision not in ("approve", "reject"):
+        raise HTTPException(400, "Неизвестное решение")
+    comment = data.comment.strip()[:1000]
+    if data.decision == "reject" and not comment:
+        raise HTTPException(400, "Напишите, почему апелляция отклонена")
+    if data.decision == "approve":
+        unblock(db, a.user, comment or "Блокировка снята")
+        a.status = "approved"
+    else:
+        a.status = "rejected"
+    a.admin_comment = comment or a.admin_comment
+    a.resolved_at = datetime.now()
+    db.commit()
+    return appeal_dict(a)
+
+
+# ---------- отзывы ----------
+
+def review_dict(r: Review):
+    return {
+        "id": r.id,
+        "seller_id": r.seller_id,
+        "seller": r.seller.name,
+        "author_id": r.author_id,
+        "author": r.author.name,
+        "rating": r.rating,
+        "text": r.text,
+        "status": r.status,
+        "created_at": r.created_at.isoformat(),
+    }
+
+
+@app.get("/api/reviews")
+def api_reviews(status: str | None = None, db: Session = Depends(get_db)):
+    query = select(Review).order_by(Review.created_at.desc(), Review.id.desc())
+    if status:
+        query = query.where(Review.status == status)
+    return [review_dict(r) for r in db.scalars(query).all()]
+
+
+@app.post("/api/reviews/{review_id}/status")
+def api_set_review_status(review_id: int, data: StatusIn, db: Session = Depends(get_db)):
+    r = db.get(Review, review_id)
+    if not r:
+        raise HTTPException(404, "Отзыв не найден")
+    if data.status not in REVIEW_STATUSES:
+        raise HTTPException(400, "Неизвестный статус")
+    r.status = data.status
+    db.commit()
+    return review_dict(r)
+
+
+@app.delete("/api/reviews/{review_id}")
+def api_delete_review(review_id: int, db: Session = Depends(get_db)):
+    r = db.get(Review, review_id)
+    if not r:
+        raise HTTPException(404, "Отзыв не найден")
+    db.delete(r)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/api/categories")
