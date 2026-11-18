@@ -1,0 +1,10 @@
+.venv
+venv
+**/__pycache__
+*.pyc
+.git
+.idea
+mobile
+backend/.env
+backend/uploads
+README.md

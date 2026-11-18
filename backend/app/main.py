@@ -1,7 +1,10 @@
+import base64
+import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,6 +19,9 @@ from .mobile import router as mobile_router, UPLOADS_DIR, photo_out, avatar_url,
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 
+ADMIN_USER = os.getenv("ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
 STATUSES = ["active", "review", "blocked"]
 REVIEW_STATUSES = ["visible", "hidden"]
 APPEAL_STATUSES = ["pending", "approved", "rejected"]
@@ -23,6 +29,8 @@ APPEAL_STATUSES = ["pending", "approved", "rejected"]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not ADMIN_PASSWORD:
+        raise RuntimeError("ADMIN_PASSWORD is not set in backend/.env")
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar VARCHAR(100)"))
@@ -42,10 +50,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ручки для мобильного приложения
+
+def is_public(request: Request) -> bool:
+    path = request.url.path
+    if request.method == "OPTIONS":
+        return True
+    if path.startswith("/api/m/") or path.startswith("/uploads/"):
+        return True
+    return request.method == "GET" and path == "/api/categories"
+
+
+def has_admin_access(header: str | None) -> bool:
+    if not header or not header.lower().startswith("basic "):
+        return False
+    try:
+        login, _, password = base64.b64decode(header[6:]).decode("utf-8").partition(":")
+    except Exception:
+        return False
+    user_ok = secrets.compare_digest(login.encode(), ADMIN_USER.encode())
+    password_ok = secrets.compare_digest(password.encode(), ADMIN_PASSWORD.encode())
+    return user_ok and password_ok
+
+
+@app.middleware("http")
+async def admin_guard(request: Request, call_next):
+    if is_public(request) or has_admin_access(request.headers.get("authorization")):
+        return await call_next(request)
+    return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Swaply admin"'})
+
 app.include_router(mobile_router)
 
-# загруженные фотографии объявлений доступны по адресу /uploads/<имя файла>
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 
 
@@ -68,7 +102,7 @@ class BlockIn(BaseModel):
 
 
 class AppealResolveIn(BaseModel):
-    decision: str  # approve / reject
+    decision: str
     comment: str = ""
 
 
@@ -159,8 +193,6 @@ def api_set_status(listing_id: int, data: StatusIn, db: Session = Depends(get_db
     return listing_dict(listing)
 
 
-# ---------- пользователи ----------
-
 @app.get("/api/users")
 def api_users(db: Session = Depends(get_db)):
     return [user_dict(u) for u in db.scalars(select(User).order_by(User.id)).all()]
@@ -239,7 +271,6 @@ def api_block_user(user_id: int, data: BlockIn, db: Session = Depends(get_db)):
 
 
 def unblock(db: Session, user: User, comment: str):
-    """Снимает блокировку и закрывает висящие апелляции пользователя."""
     user.is_blocked = False
     user.ban_reason = None
     user.ban_comment = ""
@@ -259,8 +290,6 @@ def api_unblock_user(user_id: int, db: Session = Depends(get_db)):
     db.commit()
     return user_dict(user)
 
-
-# ---------- апелляции ----------
 
 def appeal_dict(a: Appeal):
     return {
@@ -310,8 +339,6 @@ def api_resolve_appeal(appeal_id: int, data: AppealResolveIn, db: Session = Depe
     db.commit()
     return appeal_dict(a)
 
-
-# ---------- отзывы ----------
 
 def review_dict(r: Review):
     return {
@@ -386,7 +413,7 @@ def api_delete_category(category_id: int, db: Session = Depends(get_db)):
     category = db.get(Category, category_id)
     if not category:
         raise HTTPException(404, "Категория не найдена")
-    db.delete(category)  # у её объявлений category_id станет пустым
+    db.delete(category)
     db.commit()
     return {"ok": True}
 

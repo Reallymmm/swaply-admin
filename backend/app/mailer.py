@@ -15,12 +15,6 @@ def mail_configured() -> bool:
 
 
 def send_code(to: str, code: str) -> None:
-    """Отправляет письмо с кодом подтверждения через Brevo API.
-
-    Если в .env не заполнен BREVO_API_KEY, письмо не уходит, а код печатается в окно сервера -
-    так можно проверять регистрацию, пока почта не настроена.
-    При ошибке отправки бросает исключение, его ловит вызывающий код.
-    """
     if not mail_configured():
         print(f"[MAIL] BREVO_API_KEY не задан, письмо не отправлено. Код для {to}: {code}", flush=True)
         return
@@ -58,5 +52,4 @@ def send_code(to: str, code: str) -> None:
         with urllib.request.urlopen(req, timeout=15):
             pass
     except urllib.error.HTTPError as e:
-        # Brevo пишет причину в теле ответа (неверный ключ, неподтверждённый отправитель и т.д.)
         raise RuntimeError(f"Brevo вернул {e.code}: {e.read().decode('utf-8', 'replace')}") from e

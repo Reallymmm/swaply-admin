@@ -1,4 +1,3 @@
-
 const API = "";
 
 const STATUS_NAMES = {
@@ -64,7 +63,6 @@ function stars(n) {
   return "★".repeat(n) + "☆".repeat(5 - n);
 }
 
-// Окно с полями. fields: [{name, label, type: "select"|"textarea", options?}]. Возвращает значения или null.
 function openDialog(title, fields, okText) {
   return new Promise((resolve) => {
     const dlg = document.createElement("dialog");
@@ -115,7 +113,6 @@ function openDialog(title, fields, okText) {
   });
 }
 
-// Выбор причины блокировки из списка. Возвращает {reason, comment} или null.
 async function askBlock(name) {
   const reasons = await api("/api/ban-reasons");
   const res = await openDialog(

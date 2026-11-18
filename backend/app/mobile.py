@@ -89,17 +89,15 @@ class MessageIn(BaseModel):
 
 def notify(db: Session, user_id: int, kind: str, title: str, body: str = "",
            chat_id: int | None = None, listing_id: int | None = None):
-    """Добавляет уведомление в сессию (commit делает вызывающий код)."""
     db.add(Notification(user_id=user_id, kind=kind, title=title[:200], body=body[:300],
                         chat_id=chat_id, listing_id=listing_id))
 
 
 class ReadIn(BaseModel):
-    kinds: list[str] | None = None  # None - все
+    kinds: list[str] | None = None
 
 
 def ban_message(u: User) -> str:
-    """Текст для заблокированного: причина берётся из списка причин."""
     text = "Аккаунт заблокирован администратором"
     if u.ban_reason:
         text += ". Причина: " + BAN_REASONS.get(u.ban_reason, u.ban_reason)
@@ -107,7 +105,6 @@ def ban_message(u: User) -> str:
 
 
 def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
-    """Достаёт пользователя по токену из заголовка Authorization: Bearer <токен>."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Нужно войти в аккаунт")
     user = db.scalar(select(User).where(User.token == authorization[7:]))
@@ -194,14 +191,9 @@ def listing_out(x: Listing, favs: set[int], user: User):
     }
 
 
-# ---------- регистрация с подтверждением почты ----------
-# 1) /register - проверяет данные и шлёт на почту 6-значный код (аккаунт ещё не создан)
-# 2) /register/confirm - принимает код, создаёт аккаунт и сразу входит
-# 3) /register/resend - отправляет новый код
-
-CODE_TTL = timedelta(minutes=10)      # сколько живёт код
-RESEND_AFTER = timedelta(seconds=60)  # как часто можно просить новый код
-MAX_ATTEMPTS = 5                      # сколько раз можно ошибиться в коде
+CODE_TTL = timedelta(minutes=10)
+RESEND_AFTER = timedelta(seconds=60)
+MAX_ATTEMPTS = 5
 
 
 def make_code() -> str:
@@ -213,7 +205,6 @@ def code_digest(email: str, code: str) -> str:
 
 
 def deliver_code(email: str, code: str):
-    """Шлёт письмо; если почта не работает - понятная ошибка вместо падения сервера."""
     try:
         send_code(email, code)
     except Exception:
@@ -222,7 +213,6 @@ def deliver_code(email: str, code: str):
 
 
 def wait_seconds(pending: EmailCode) -> int:
-    """Сколько секунд ещё нельзя запрашивать новый код (0 - уже можно)."""
     left = (RESEND_AFTER - (datetime.now() - pending.created_at)).total_seconds()
     return int(left) + 1 if left > 0 else 0
 
@@ -245,7 +235,7 @@ def register(data: RegisterIn, db: Session = Depends(get_db)):
         raise HTTPException(429, f"Код уже отправлен. Повторить можно через {wait_seconds(pending)} с")
 
     code = make_code()
-    deliver_code(email, code)  # сначала письмо: если оно не ушло, в базе ничего не остаётся
+    deliver_code(email, code)
 
     now = datetime.now()
     if not pending:
@@ -327,8 +317,6 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     return {"token": user.token, "user": user_out(user)}
 
 
-# ---------- апелляции (работают без токена: заблокированного пользователя токен не пускает) ----------
-
 def blocked_user(db: Session, email: str, password: str) -> User:
     user = db.scalar(select(User).where(User.email == email.strip().lower()))
     if not user or not verify_password(password, user.password_hash):
@@ -351,7 +339,6 @@ def appeal_out(a: Appeal):
 
 @router.post("/appeals/status")
 def appeals_status(data: CredentialsIn, db: Session = Depends(get_db)):
-    """Причина блокировки и история апелляций - для экрана «Аккаунт заблокирован»."""
     user = blocked_user(db, data.email, data.password)
     appeals = db.scalars(select(Appeal).where(Appeal.user_id == user.id).order_by(Appeal.id.desc())).all()
     return {
@@ -387,8 +374,7 @@ def me(user: User = Depends(current_user)):
 
 @router.put("/me/city")
 def set_city(data: CityIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """Меняет местоположение пользователя. Город в его объявлениях обновляется вместе с ним."""
-    city = " ".join(data.city.split())  # убираем лишние пробелы
+    city = " ".join(data.city.split())
     if len(city) > 100:
         raise HTTPException(400, "Слишком длинное название (до 100 символов)")
     user.city = city
@@ -478,7 +464,6 @@ def feed(q: str = "", category_id: int | None = None, db: Session = Depends(get_
     q = q.strip()
     if q:
         query = query.where(or_(Listing.title.ilike(f"%{q}%"), Listing.want.ilike(f"%{q}%")))
-    # фильтр по категории (если не передан - показываем всё)
     if category_id is not None:
         query = query.where(Listing.category_id == category_id)
     favs = favorite_ids(db, user)
@@ -656,7 +641,6 @@ def my_chat(db: Session, chat_id: int, user: User) -> Chat:
 
 @router.post("/chats")
 def open_chat(data: ChatIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """Открывает чат по объявлению (если его ещё нет - создаёт)."""
     listing = db.get(Listing, data.listing_id)
     if not listing or listing.status != "active":
         raise HTTPException(404, "Объявление не найдено")
@@ -717,8 +701,6 @@ def send_message(chat_id: int, data: MessageIn, db: Session = Depends(get_db), u
     return message_out(m, user)
 
 
-# ---------- уведомления (приложение опрашивает сервер, пока открыто) ----------
-
 def notification_out(n: Notification):
     return {
         "id": n.id,
@@ -734,7 +716,6 @@ def notification_out(n: Notification):
 
 @router.get("/notifications/history")
 def notifications_history(before: int | None = None, limit: int = 30, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """История уведомлений, новые сверху. Следующая страница: before = id последнего полученного."""
     limit = max(1, min(limit, 100))
     query = select(Notification).where(Notification.user_id == user.id).order_by(Notification.id.desc()).limit(limit + 1)
     if before is not None:
@@ -745,8 +726,6 @@ def notifications_history(before: int | None = None, limit: int = 30, db: Sessio
 
 @router.get("/notifications")
 def poll_notifications(after: int | None = None, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    """Новые уведомления (id больше after) и счётчики непрочитанных.
-    Первый запрос (без after) ничего не возвращает, только last_id, чтобы старое не всплывало."""
     last_id = db.scalar(select(func.max(Notification.id)).where(Notification.user_id == user.id)) or 0
     items = []
     if after is not None:
@@ -761,7 +740,7 @@ def poll_notifications(after: int | None = None, db: Session = Depends(get_db), 
     def unread(*where):
         return db.scalar(
             select(func.count()).select_from(Notification)
-            .where(Notification.user_id == user.id, Notification.is_read == False, *where)  # noqa: E712
+            .where(Notification.user_id == user.id, Notification.is_read == False, *where)
         )
 
     return {
@@ -774,7 +753,7 @@ def poll_notifications(after: int | None = None, db: Session = Depends(get_db), 
 
 @router.post("/notifications/read")
 def read_notifications(data: ReadIn, db: Session = Depends(get_db), user: User = Depends(current_user)):
-    query = select(Notification).where(Notification.user_id == user.id, Notification.is_read == False)  # noqa: E712
+    query = select(Notification).where(Notification.user_id == user.id, Notification.is_read == False)
     if data.kinds == ["message"]:
         query = query.where(Notification.kind == "message")
     elif data.kinds == ["other"]:

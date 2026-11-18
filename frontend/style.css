@@ -11,7 +11,6 @@ body {
   background: #f3f4f6;
 }
 
-/* левое меню */
 .sidebar {
   position: fixed;
   top: 0;
@@ -47,13 +46,11 @@ body {
   background: #3a425a;
 }
 
-/* текущая страница в меню */
 .menu a.current {
   background: #3a425a;
   color: white;
 }
 
-/* правая часть */
 .main {
   margin-left: 200px;
 }
@@ -80,7 +77,6 @@ h2 {
   font-size: 18px;
 }
 
-/* карточки на обзоре */
 .stats {
   display: flex;
   gap: 15px;
@@ -119,7 +115,6 @@ th {
   background: #eceef2;
 }
 
-/* кнопки (заглушки) */
 button {
   padding: 5px 10px;
   margin-right: 4px;
@@ -133,7 +128,6 @@ button:hover {
   background: #e2e4e8;
 }
 
-/* статусы */
 .active {
   color: green;
 }
@@ -146,7 +140,6 @@ button:hover {
   color: red;
 }
 
-/* ---- добавлено для бэкенда ---- */
 .inline {
   display: inline;
 }
@@ -175,7 +168,6 @@ button:hover {
   display: none;
 }
 
-/* ---- страницы объявления и пользователя ---- */
 a {
   color: #2b5fd9;
   text-decoration: none;
@@ -264,7 +256,6 @@ a:hover {
   border: 1px solid #b7dfc1;
 }
 
-/* ---- модерация ---- */
 .filter {
   margin-bottom: 15px;
 }
